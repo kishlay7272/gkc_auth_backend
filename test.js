@@ -1,1 +1,0 @@
-const a="select b.Branch_name,c.Name,o.order_id,o.total,created_date,group_concat(i.item_name) from order  o JOIN `customer` c ON  `o`.`customer_id`=`c`.customer_id   JOIN  item i ON i.order_id=o.order_id JOIN branch b ON b.branch_id=o.branch_id group by o.order_id"

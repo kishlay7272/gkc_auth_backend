@@ -1,75 +1,133 @@
-// const express = require('express');
 require('../../app');
 const dbConn_sql = require('../../config/db_sql.config');
 const Order = require('../models/order.model');
 const Customer = require('../models/customer.model');
-
 const Item = require('../models/item.model');
-const userService = require('../services/user.services');
 const Branch_platform = require('../models/branch_platform.model');
 const User = require('../models/user.model');
 const axios = require('axios');
+var bcrypt = require('bcryptjs');
+var jwt = require("jsonwebtoken");
+
 
 module.exports = {
 
-    authenticate: async function (req, res, next) {
-        try{
-            console.log(req.body);
-            const token= await userService.authenticate(req.body)
-            await Branch_platform.update_token(token, async function (err, token) {
-                if (err)
-                    console.log(err);
-                    else
-                    console.log(token)
-            })
+    signup: async function (req, res, next) {
+
+        try {
+            if (!req.body || !req.body.email || !req.body.email || req.body.email == "undefined" || req.body.password == "undefined") {
+                return res.status(400).json(
+                    {
+                        "status": "400",
+                        "error": "missing email or password in body"
+                    })
+            }
+
+            else {
+                let salt = await bcrypt.genSalt(10);
+                let hasPassword = await bcrypt.hash(req.body.password, salt);
+                console.log(hasPassword);
+
+                let email = req.body.email;
+                let phone = req.body.phone;
+                console.log(email, phone);
+                const prodsQuery1 = "select * from `User` where email=" + `'${email}'`;
+                dbConn_sql.query(prodsQuery1, async function (error, results) {
+                    if (error)
+                        res.status(500).send(error);
+                    if (!results || results.length == 0) {
+                        const prodsQuery = "insert into `User` (Email,Phone,`password`) values(" + `'${email}',` + `${phone},` + `'${hasPassword}')`
+                        console.log(prodsQuery);
+                        dbConn_sql.query(prodsQuery, async function (error, results) {
+                            console.log(prodsQuery)
+                            if (error)
+                                res.status(500).send(error);
+
+                            if (results) {
+                                return res.status(200).json(
+                                    {
+                                        "status": "200",
+                                        "error": "user created successfully"
+                                    }
+                                );
+                            }
+                        })
+                    }
+                    else {
+
+                        return res.status(200).json(
+                            {
+                                "status": "200",
+                                "error": "user already exists"
+                            })
 
 
-            res.json(token);
+                    }
 
+                })
+
+            }
+            // Save User in the datab
         }
-      catch (error) {
-          console.log(error)
-        return next();
-      }
+        catch (error) {
+            res.status(500).send(error);
+        }
     },
     login: async function (req, res, next) {
-        try{
-            console.log("kk",req.body);
-            console.log(req.headers);
-            const token= await userService.authenticate(req.body)
-            console.log("contoller",token);
-            const auth_details=req.body;
-             auth_details.token1=token;
-            await User.login(auth_details, async function (err, auth_details) {
-                if (err)
-                    console.log(err);
-                    else
+        try {
+            if (!req.body || !req.body.email || !req.body.email || req.body.email == "undefined" || req.body.password == "undefined") {
+                return res.status(400).json(
                     {
-                        console.log(auth_details)
-
-                        // await User.update_token(token, async function (err, token) {
-                        //     if (err)
-                        //         console.log(err);
-                        //         else
-                        //         console.log(token)
-                        // })
+                        "status": "400",
+                        "error": "missing email or password in body"
+                    })
+            }
+            else {
+                let email = req.body.email;
+                const prodsQuery1 = "select * from `User` where email=" + `'${email}'`;
+                dbConn_sql.query(prodsQuery1, async function (error, results) {
+                    if (error)
+                        res.status(500).send(error);
+                    if (results.length == 0) {
+                        return res.status(400).json(
+                            {
+                                "status": "400",
+                                "error": "user does not exist"
+                            })
                     }
-            })
+                    else {
+                        const validPass = await bcrypt.compare(req.body.password, results[0].password);
+                        if (!validPass)
+                            return res.status(400).send("Mobile/Email or Password is wrong");
+
+                        // Create and assign token
+                        let secret = "life is a mess"
+                        const token = jwt.sign({ id: results[0].email, user_type: "manager" }, secret);
+                        const verified = jwt.verify(token, secret); 
+                        console.log(verified.user_type);
+                        return res.header("auth-token", token).status(400).json(
+                            {
+                                "status": "200",
+                                "error": "logged in"
+                            }
+                        );
+                        // res.header("auth-token", token).send({ "token": token });
 
 
+                        // res.send("Logged IN");
 
+                    }
+                })
+            }
 
-            res.json(token);
-
+        } catch (error) {
+            return res.status(500).send(error);
         }
-      catch (error) {
-          console.log(error)
-        return next();
-      }
     },
+
     ready: async function (req, res, next) {
         try {
-            if (!req.query.orderId || (req.query.orderId=="undefined")) {
+            if (!req.query.orderId || (req.query.orderId == "undefined")) {
                 return res.status(400).json(
                     {
                         "status": "400",
@@ -77,48 +135,48 @@ module.exports = {
                     }
                 );
             }
-            else{
-            let orderId = req.query.orderId;
-            console.log(orderId);
-            const prodsQuery = "select * from `order` join session ON `order`.branch_id=`session`.branch_id where `order`.order_id=" + `"${orderId}"`
-            dbConn_sql.query(prodsQuery, async function (error, results) {
-                console.log(prodsQuery)
-                if (error) throw error;
-                if (results) {
-                    let legacyId = results[0].legacy_id;
-                    let short_merchant_id = results[0].short_merchant_id;
-                    let url1 = "https://api-gtm.grubhub.com/merchant/" + short_merchant_id + "/orders/" + legacyId + "/status";
+            else {
+                let orderId = req.query.orderId;
+                console.log(orderId);
+                const prodsQuery = "select * from `order` join session ON `order`.branch_id=`session`.branch_id where `order`.order_id=" + `"${orderId}"`
+                dbConn_sql.query(prodsQuery, async function (error, results) {
+                    console.log(prodsQuery)
+                    if (error) throw error;
+                    if (results) {
+                        let legacyId = results[0].legacy_id;
+                        let short_merchant_id = results[0].short_merchant_id;
+                        let url1 = "https://api-gtm.grubhub.com/merchant/" + short_merchant_id + "/orders/" + legacyId + "/status";
 
-                    let authentication_token = results[0].token;
-                    console.log(url1)
-                    await axios({
-                        method: 'put',
-                        url: url1,
-                        data: { "status": "PICKUP_READY", "unpause_merchant": false },
+                        let authentication_token = results[0].token;
+                        console.log(url1)
+                        await axios({
+                            method: 'put',
+                            url: url1,
+                            data: { "status": "PICKUP_READY", "unpause_merchant": false },
 
-                        headers: {
-                            'Accept': 'application/json',
-                            'content-type': 'application/json',
-                            'authorization': authentication_token,
-                            'origin': 'https://restaurant.grubhub.com'
-                        }
-                    }).then(response => {
-                        res.status(200).json(response.data)
-                        console.log(response.data)
-                    }).catch(err => {
-                        console.log(err);
-                        res.status(404).json({ "error": err });
-                    })
-                }
-            })
-        }
+                            headers: {
+                                'Accept': 'application/json',
+                                'content-type': 'application/json',
+                                'authorization': authentication_token,
+                                'origin': 'https://restaurant.grubhub.com'
+                            }
+                        }).then(response => {
+                            res.status(200).json(response.data)
+                            console.log(response.data)
+                        }).catch(err => {
+                            console.log(err);
+                            res.status(404).json({ "error": err });
+                        })
+                    }
+                })
+            }
         } catch (error) {
-            console.log(error);
+            res.status(500).send(error);
         }
     },
     confirm: async function (req, res, next) {
         try {
-            if (!req.query.orderId || (req.query.orderId=="undefined")) {
+            if (!req.query.orderId || (req.query.orderId == "undefined")) {
                 return res.status(400).json(
                     {
                         "status": "400",
@@ -126,48 +184,106 @@ module.exports = {
                     }
                 );
             }
-            else{
-            let orderId = req.query.orderId;
-            console.log(orderId);
-            const prodsQuery = "select * from `order` join session ON `order`.branch_id=`session`.branch_id where `order`.order_id=" + `"${orderId}"`
-            dbConn_sql.query(prodsQuery, async function (error, results) {
+            else {
+                let orderId = req.query.orderId;
+                console.log(orderId);
+                const prodsQuery = "select * from `order` join session ON `order`.branch_id=`session`.branch_id where `order`.order_id=" + `"${orderId}"`
+                dbConn_sql.query(prodsQuery, async function (error, results) {
+                    console.log(prodsQuery)
+                    if (error) throw error;
+                    if (results) {
+                        let legacyId = results[0].legacy_id;
+                        let short_merchant_id = results[0].short_merchant_id;
+                        let url1 = "https://api-gtm.grubhub.com/merchant/" + short_merchant_id + "/orders/" + legacyId + "/status";
+
+                        let authentication_token = results[0].token;
+                        console.log(url1)
+                        await axios({
+                            method: 'put',
+                            url: url1,
+                            data: { "status": "CONFIRMED", "wait_time_in_minutes": 10, "unpause_merchant": false },
+                            headers: {
+                                'Accept': 'application/json',
+                                'content-type': 'application/json',
+                                'authorization': authentication_token,
+                                'origin': 'https://restaurant.grubhub.com'
+                            }
+                        }).then(response => {
+                            res.status(200).json(response.data)
+                            console.log(response.data)
+                        }).catch(err => {
+                            console.log(err);
+                            res.status(404).json({ "error": err });
+                        })
+                    }
+                })
+            }
+        } catch (error) {
+            res.status(500).send(error);
+        }
+    },
+    verifyuser: async function (req, res, next) {
+        try {
+            if (!req.body || !req.body.email || !req.body.email || req.body.email == "undefined" || req.body.password == "undefined") {
+                return res.status(400).json(
+                    {
+                        "status": "400",
+                        "error": "missing email or password in body"
+                    })
+            }
+            const prodsQuery = "select * from `User`  where email=" + `"${req.body.email}"`;
+            dbConn_sql.query(prodsQuery, function (error, results) {
+                console.log(prodsQuery)
+                if (error) {
+                    return res.status(400).json(
+                        {
+                            "status": "400",
+                            "error": "wrong email in body"
+                        })
+                };
+                if (results.length == 0) {
+                    res.send("user does not exist");
+                }
+                if (results) {
+                    if (results[0].Password == req.body.password) {
+                        next();
+                    }
+                    else {
+                        return res.status(400).json(
+                            {
+                                "status": "400",
+                                "error": "wrong password in body"
+                            })
+                    }
+                }
+            })
+
+        } catch (error) {
+            res.status(500).send(error);
+        }
+    },
+    getRestaurantAccess: async function (req, res, next) {
+        try {
+            const prodsQuery = "select * from `restaurant` join `branch` ON `branch`.Branch_id=restaurant.Restaurant_id where email= " + `"${req.body.email}"`;
+
+            dbConn_sql.query(prodsQuery, function (error, results) {
                 console.log(prodsQuery)
                 if (error) throw error;
                 if (results) {
-                    let legacyId = results[0].legacy_id;
-                    let short_merchant_id = results[0].short_merchant_id;
-                    let url1 = "https://api-gtm.grubhub.com/merchant/" + short_merchant_id + "/orders/" + legacyId + "/status";
-
-                    let authentication_token = results[0].token;
-                    console.log(url1)
-                    await axios({
-                        method: 'put',
-                        url: url1,
-                        data: { "status": "CONFIRMED", "wait_time_in_minutes": 10, "unpause_merchant": false },
-                        headers: {
-                            'Accept': 'application/json',
-                            'content-type': 'application/json',
-                            'authorization': authentication_token,
-                            'origin': 'https://restaurant.grubhub.com'
-                        }
-                    }).then(response => {
-                        res.status(200).json(response.data)
-                        console.log(response.data)
-                    }).catch(err => {
-                        console.log(err);
-                        res.status(404).json({ "error": err });
-                    })
+                    console.log(results);
+                    req.body.branch = results[0].Branch_id;
+                    next();
                 }
             })
-        }
+
         } catch (error) {
-            console.log(error);
+            res.status(500).send(error);
         }
     },
-
     getOrder: async function (req, res, next) {
         try {
-            if (!req.query.orderId || (req.query.orderId=="undefined")) {
+            console.log(req.body);
+            if (!req.query.orderId || (req.query.orderId == "undefined")) {
                 return res.status(400).json(
                     {
                         "status": "400",
@@ -178,13 +294,12 @@ module.exports = {
             else {
                 const orderId = req.query.orderId;
                 // query for fetching data with page number and offset
-                const prodsQuery = "select * from `order`  JOIN `customer` ON  `order`.customer_id=customer.customer_id JOIN item ON `item`.order_id=`order`.order_id where `order`.`order_id`= " + `"${orderId}"`
+                const prodsQuery = "select * from `order`  JOIN `customer` ON  `order`.customer_id=customer.customer_id JOIN item ON `item`.order_id=`order`.order_id where `order`.`order_id`= " + `"${orderId} "` + " and `order`.`Branch_id` IN ('ce1a1d32-4053-45c5-93e5-79fde0bf0d06')"
                 dbConn_sql.query(prodsQuery, function (error, results) {
                     console.log(prodsQuery)
                     if (error) throw error;
                     if (results) {
                         let item_count = results.length;
-
                         let items = [];
                         for (key of results) {
                             items.push({ item_id: key.item_id, item_name: key.item_name, item_price: key.price, item_quantity: key.quantity });
@@ -207,24 +322,22 @@ module.exports = {
                             "items": items
                         }
                         res.send([orderObject]);
-
                     }
 
                 })
             }
 
         }
-        catch (e) {
-            console.log("upload - catch block");
-            console.log(e);
-            return next();
+        catch (eroor) {
+            res.status(500).send(error);
+
 
         }
     },
     getAllOrder: async function (req, res, next) {
         try {
             console.log(req.query.page, req.query.limit);
-            if (!req.query.limit || !req.query.page  || (req.query.limit=="undefined") || (req.query.page="undefined")) {
+            if (!req.query.limit || !req.query.page || (req.query.limit == "undefined") || (req.query.page = "undefined")) {
                 return res.status(400).json(
                     {
                         "status": "400",
@@ -295,16 +408,15 @@ module.exports = {
             }
 
         }
-        catch (e) {
-            console.log("upload - catch block");
-            console.log(e);
-            return next();
+        catch (error) {
+            res.status(500).send(error);
+
 
         }
     },
     totalOrders: async function (req, res, next) {
         try {
-            if (!req.query.limit || !req.query.page  || (req.query.limit=="undefined") || (req.query.page="undefined")) {
+            if (!req.query.limit || !req.query.page || (req.query.limit == "undefined") || (req.query.page = "undefined")) {
                 return res.status(400).json(
                     {
                         "status": "400",
@@ -320,7 +432,7 @@ module.exports = {
                 const offset = (page - 1) * limit;
                 let totalPage;
 
-                let prodsQuery1 = "select b.Branch_name,c.Name,o.order_id,o.total,created_date,group_concat(i.item_name) as item from `order`  o JOIN `customer` c ON  o.customer_id=c.customer_id JOIN  item i ON i.order_id=o.order_id JOIN branch b ON b.branch_id=o.branch_id group by o.order_id limit "+ `${limit}` + " offset " + `${offset}`
+                let prodsQuery1 = "select b.Branch_name,c.Name,o.order_id,o.total,created_date,group_concat(i.item_name) as item from `order`  o JOIN `customer` c ON  o.customer_id=c.customer_id JOIN  item i ON i.order_id=o.order_id JOIN branch b ON b.branch_id=o.branch_id group by o.order_id limit " + `${limit}` + " offset " + `${offset}`
                 dbConn_sql.query(prodsQuery1, function (error, results) {
                     if (error) throw error;
                     if (results) {
@@ -344,7 +456,7 @@ module.exports = {
             }
 
         } catch (error) {
-            console.log(error);
+            res.status(500).send(error);
         }
     },
     get_customer: async function (req, res, next) {
@@ -375,10 +487,9 @@ module.exports = {
             });
         }
 
-        catch (e) {
-            console.log("upload - catch block");
-            console.log(e);
-            return next();
+        catch (error) {
+            res.status(500).send(error);
+
         }
     },
     get_grubhub_orders: async function (req, res, next) {
@@ -409,10 +520,9 @@ module.exports = {
             });
         }
 
-        catch (e) {
-            console.log("upload - catch block");
-            console.log(e);
-            return next();
+        catch (error) {
+            res.status(500).send(error);
+
         }
     },
 
